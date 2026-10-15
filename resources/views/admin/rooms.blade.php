@@ -26,6 +26,16 @@
                 @error('key')
                     <p class="mt-2 text-sm text-red-300">{{ $message }}</p>
                 @enderror
+                <input
+                    name="name"
+                    value="{{ old('name') }}"
+                    maxlength="120"
+                    class="mt-3 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 outline-none ring-gold/40 focus:ring-2"
+                    placeholder="{{ __('messages.admin.name_placeholder') }}"
+                >
+                @error('name')
+                    <p class="mt-2 text-sm text-red-300">{{ $message }}</p>
+                @enderror
                 <button class="btn-gold mt-4 w-full rounded-2xl px-4 py-3">{{ __('messages.admin.create') }}</button>
             </form>
         </section>
@@ -36,6 +46,9 @@
                 @forelse ($rooms as $room)
                     <article class="rounded-2xl border border-white/8 bg-black/20 p-4">
                         <p class="font-semibold text-gold-soft">{{ $room->key }}</p>
+                        @if ($room->name)
+                            <p class="mt-0.5 text-sm text-white/75">{{ $room->name }}</p>
+                        @endif
                         <p class="mt-1 text-sm text-white/55">{{ __('messages.admin.games') }} {{ $room->plays_count }} · {{ __('messages.admin.photos') }} {{ $room->photos_count }}</p>
                         <p class="mt-1 text-xs text-white/40">{{ $room->created_at->format('d.m.Y H:i') }}</p>
                         <div class="mt-3 flex flex-wrap gap-2">
@@ -56,6 +69,7 @@
                     <thead class="text-white/45">
                         <tr>
                             <th class="pb-3 font-medium">{{ __('messages.admin.col_key') }}</th>
+                            <th class="pb-3 font-medium">{{ __('messages.admin.col_name') }}</th>
                             <th class="pb-3 font-medium">{{ __('messages.admin.col_games') }}</th>
                             <th class="pb-3 font-medium">{{ __('messages.admin.col_photos') }}</th>
                             <th class="pb-3 font-medium">{{ __('messages.admin.col_created') }}</th>
@@ -66,6 +80,7 @@
                         @forelse ($rooms as $room)
                             <tr class="border-t border-white/8">
                                 <td class="py-3 font-semibold text-gold-soft">{{ $room->key }}</td>
+                                <td class="py-3 text-white/75">{{ $room->name ?? '—' }}</td>
                                 <td class="py-3">{{ $room->plays_count }}</td>
                                 <td class="py-3">{{ $room->photos_count }}</td>
                                 <td class="py-3 text-white/55">{{ $room->created_at->format('d.m.Y H:i') }}</td>
@@ -82,7 +97,7 @@
                             </tr>
                         @empty
                             <tr>
-                                <td colspan="5" class="py-8 text-white/45">{{ __('messages.admin.empty') }}</td>
+                                <td colspan="6" class="py-8 text-white/45">{{ __('messages.admin.empty') }}</td>
                             </tr>
                         @endforelse
                     </tbody>

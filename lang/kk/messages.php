@@ -113,6 +113,8 @@ return [
         'delete_confirm' => ':key бөлмесін жою керек пе?',
         'empty' => 'Әзірге бөлмелер жоқ.',
         'col_key' => 'Кілт',
+        'col_name' => 'Иесі',
+        'name_placeholder' => 'Иесінің аты (міндетті емес)',
         'col_games' => 'Ойындар',
         'col_photos' => 'Фото',
         'col_created' => 'Жасалған',

@@ -30,6 +30,19 @@ class PromptGameTest extends TestCase
         $this->assertSame(1, Room::query()->count());
     }
 
+    public function test_room_can_store_optional_owner_name(): void
+    {
+        $this->post('/admin/login', ['password' => 'njjh-gjk-2000']);
+
+        $this->post('/admin/rooms', ['key' => 'aliya-01', 'name' => '  Әлия Нұрланқызы '])->assertRedirect();
+        $this->post('/admin/rooms', ['key' => 'no-owner'])->assertRedirect();
+
+        $this->assertDatabaseHas('rooms', ['key' => 'aliya-01', 'name' => 'Әлия Нұрланқызы']);
+        $this->assertDatabaseHas('rooms', ['key' => 'no-owner', 'name' => null]);
+
+        $this->get('/admin/rooms')->assertOk()->assertSee('Әлия Нұрланқызы', false);
+    }
+
     public function test_home_page_defaults_to_russian_and_can_switch_to_kazakh(): void
     {
         $this->get('/')

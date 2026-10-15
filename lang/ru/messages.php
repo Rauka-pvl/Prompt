@@ -113,6 +113,8 @@ return [
         'delete_confirm' => 'Удалить комнату :key?',
         'empty' => 'Пока нет комнат.',
         'col_key' => 'Ключ',
+        'col_name' => 'Владелец',
+        'name_placeholder' => 'Имя владельца (необязательно)',
         'col_games' => 'Игр',
         'col_photos' => 'Фото',
         'col_created' => 'Создана',

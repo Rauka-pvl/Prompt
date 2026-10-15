@@ -10,6 +10,7 @@ class Room extends Model
 {
     protected $fillable = [
         'key',
+        'name',
         'plays_count',
     ];
 

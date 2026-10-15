@@ -60,6 +60,7 @@ class AdminController extends Controller
     {
         $data = $request->validate([
             'key' => ['required', 'string', 'max:64', 'regex:/^[A-Za-z0-9\-_]+$/', 'unique:rooms,key'],
+            'name' => ['nullable', 'string', 'max:120'],
         ], [
             'key.required' => __('messages.admin.validation_key_required'),
             'key.unique' => __('messages.admin.validation_key_unique'),
@@ -68,6 +69,7 @@ class AdminController extends Controller
 
         Room::query()->create([
             'key' => $data['key'],
+            'name' => filled($data['name'] ?? null) ? trim($data['name']) : null,
         ]);
 
         return back()->with('status', __('messages.admin.status_created'));

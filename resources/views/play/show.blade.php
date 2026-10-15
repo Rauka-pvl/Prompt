@@ -17,6 +17,7 @@
         x-data="promptGame({
             stateUrl: @js(route('play.state', $room)),
             startUrl: @js(route('play.start', $room)),
+            transcribeUrl: @js(route('play.transcribe', $room)),
             submitUrl: @js(route('play.submit', $room)),
             generateUrl: @js(route('play.generate', $room)),
             resetUrl: @js(route('play.reset', $room)),
@@ -68,7 +69,7 @@
                         type="button"
                         class="mic-button"
                         :class="listening ? 'is-listening' : ''"
-                        :disabled="!speechSupported || loading"
+                        :disabled="!speechSupported || loading || transcribing"
                         @click="toggleMic()"
                     >
                         <span class="mic-pulse" x-show="listening"></span>
@@ -83,17 +84,18 @@
                     <p class="play-mic-status" :class="listening ? 'is-live' : ''">
                         <span x-show="!speechSupported">{{ __('messages.play.mic_unsupported') }}</span>
                         <span x-show="speechSupported && listening">{{ __('messages.play.mic_listening') }}</span>
-                        <span x-show="speechSupported && !listening && secondsLeft === 0 && !hasSpeech">{{ __('messages.play.mic_timeout_empty') }}</span>
-                        <span x-show="speechSupported && !listening && secondsLeft === 0 && hasSpeech">{{ __('messages.play.mic_timeout_ready') }}</span>
-                        <span x-show="speechSupported && !listening && secondsLeft !== 0 && !hasSpeech">{{ __('messages.play.mic_idle_empty') }}</span>
-                        <span x-show="speechSupported && !listening && secondsLeft !== 0 && hasSpeech">{{ __('messages.play.mic_idle_ready') }}</span>
+                        <span x-show="transcribing">{{ __('messages.play.mic_transcribing') }}</span>
+                        <span x-show="speechSupported && !listening && !transcribing && secondsLeft === 0 && !hasSpeech">{{ __('messages.play.mic_timeout_empty') }}</span>
+                        <span x-show="speechSupported && !listening && !transcribing && secondsLeft === 0 && hasSpeech">{{ __('messages.play.mic_timeout_ready') }}</span>
+                        <span x-show="speechSupported && !listening && !transcribing && secondsLeft !== 0 && !hasSpeech">{{ __('messages.play.mic_idle_empty') }}</span>
+                        <span x-show="speechSupported && !listening && !transcribing && secondsLeft !== 0 && hasSpeech">{{ __('messages.play.mic_idle_ready') }}</span>
                     </p>
                 </div>
 
                 <button
                     type="button"
                     class="btn-gold play-btn"
-                    :disabled="loading || !hasSpeech"
+                    :disabled="loading || transcribing || !hasSpeech"
                     @click="submitPrompt()"
                 >
                     <span x-text="loading ? @js(__('messages.play.saving')) : @js(__('messages.play.review_button'))"></span>

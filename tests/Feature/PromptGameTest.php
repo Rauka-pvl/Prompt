@@ -6,6 +6,7 @@ use App\Models\Room;
 use App\Services\ForbiddenWordFilter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -165,6 +166,77 @@ class PromptGameTest extends TestCase
             ->assertStatus(422);
 
         $this->getJson("/play/{$room->key}/state")->assertJsonPath('status', 'prompted');
+    }
+
+    public function test_recorded_speech_is_transcribed_on_the_server(): void
+    {
+        Storage::fake('public');
+        config(['prompt.fal_key' => 'test-key']);
+
+        Http::fake([
+            'rest.alpha.fal.ai/*' => Http::response([
+                'upload_url' => 'https://v3b.fal.media/files/upload?sig=1',
+                'file_url' => 'https://v3b.fal.media/files/speech.webm',
+            ]),
+            'v3b.fal.media/*' => Http::response('', 200),
+            'fal.run/fal-ai/elevenlabs/*' => Http::response([
+                'text' => 'Көк машина (laughs) рядом серая стена',
+            ]),
+        ]);
+
+        $room = Room::query()->create(['key' => 'demo']);
+
+        $this->post("/host/{$room->key}/photos", [
+            'photos' => [UploadedFile::fake()->image('car.jpg', 200, 200)],
+        ])->assertRedirect();
+
+        $photo = $room->photos()->firstOrFail();
+        $this->post("/host/{$room->key}/photos/{$photo->id}/activate")->assertRedirect();
+
+        $audio = UploadedFile::fake()->create('speech.webm', 40, 'audio/webm');
+
+        $this->post("/play/{$room->key}/transcribe", ['audio' => $audio])
+            ->assertStatus(422);
+
+        $this->postJson("/play/{$room->key}/start")->assertOk();
+
+        $this->post("/play/{$room->key}/transcribe", ['audio' => $audio])
+            ->assertOk()
+            ->assertJsonPath('text', 'Көк машина рядом серая стена');
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'fal.run/fal-ai/elevenlabs/speech-to-text')
+            && $request['audio_url'] === 'https://v3b.fal.media/files/speech.webm'
+            && ! isset($request['language_code']));
+    }
+
+    public function test_transcription_falls_back_to_whisper(): void
+    {
+        Storage::fake('public');
+        config(['prompt.fal_key' => 'test-key']);
+
+        Http::fake([
+            'rest.alpha.fal.ai/*' => Http::response([
+                'upload_url' => 'https://v3b.fal.media/files/upload?sig=1',
+                'file_url' => 'https://v3b.fal.media/files/speech.webm',
+            ]),
+            'v3b.fal.media/*' => Http::response('', 200),
+            'fal.run/fal-ai/elevenlabs/*' => Http::response(['detail' => 'down'], 500),
+            'fal.run/fal-ai/whisper' => Http::response(['text' => ' Қызыл үй. ']),
+        ]);
+
+        $room = Room::query()->create(['key' => 'demo']);
+
+        $this->post("/host/{$room->key}/photos", [
+            'photos' => [UploadedFile::fake()->image('house.jpg', 200, 200)],
+        ])->assertRedirect();
+
+        $photo = $room->photos()->firstOrFail();
+        $this->post("/host/{$room->key}/photos/{$photo->id}/activate")->assertRedirect();
+        $this->postJson("/play/{$room->key}/start")->assertOk();
+
+        $this->post("/play/{$room->key}/transcribe", [
+            'audio' => UploadedFile::fake()->create('speech.webm', 40, 'audio/webm'),
+        ])->assertOk()->assertJsonPath('text', 'Қызыл үй.');
     }
 
     public function test_changing_active_photo_cancels_open_round(): void

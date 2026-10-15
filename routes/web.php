@@ -24,6 +24,7 @@ Route::prefix('play/{room}')->name('play.')->group(function () {
     Route::get('/', [PlayController::class, 'show'])->name('show');
     Route::get('/state', [PlayController::class, 'state'])->name('state');
     Route::post('/start', [PlayController::class, 'start'])->name('start');
+    Route::post('/transcribe', [PlayController::class, 'transcribe'])->name('transcribe');
     Route::post('/submit', [PlayController::class, 'submit'])->name('submit');
     Route::post('/generate', [PlayController::class, 'generate'])->name('generate');
     Route::post('/reset', [PlayController::class, 'reset'])->name('reset');

@@ -8,6 +8,7 @@ use App\Models\RoomPhoto;
 use App\Models\Round;
 use App\Services\ForbiddenWordFilter;
 use App\Services\ImageSimilarity;
+use App\Services\SpeechTranscriber;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -92,6 +93,33 @@ class PlayController extends Controller
         ]);
 
         return $this->state($room->fresh());
+    }
+
+    public function transcribe(Request $request, Room $room, SpeechTranscriber $transcriber): JsonResponse
+    {
+        $round = $room->currentRound();
+
+        if (! $round || $round->status !== Round::STATUS_PLAYING) {
+            return response()->json([
+                'message' => __('messages.play.error_press_start'),
+            ], 422);
+        }
+
+        $request->validate([
+            'audio' => ['required', 'file', 'max:10240'],
+        ]);
+
+        try {
+            $text = $transcriber->transcribe($request->file('audio'));
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json([
+                'message' => __('messages.js.transcribe_error'),
+            ], 502);
+        }
+
+        return response()->json(['text' => $text]);
     }
 
     public function submit(Request $request, Room $room, ForbiddenWordFilter $filter): JsonResponse

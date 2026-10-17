@@ -34,7 +34,11 @@ class PlayController extends Controller
 
         if ($current) {
             $status = $current->status;
-        } elseif ($latest?->status === Round::STATUS_DONE) {
+        } elseif (
+            $latest?->status === Round::STATUS_DONE
+            && $active !== null
+            && $latest->room_photo_id === $active->id
+        ) {
             $status = Round::STATUS_DONE;
         }
 

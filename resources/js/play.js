@@ -6,7 +6,31 @@ function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function readDismissedRound(key) {
+    try {
+        const value = Number(window.localStorage.getItem(key));
+
+        return Number.isFinite(value) && value > 0 ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+function storeDismissedRound(key, roundId) {
+    try {
+        if (roundId) {
+            window.localStorage.setItem(key, String(roundId));
+        } else {
+            window.localStorage.removeItem(key);
+        }
+    } catch {
+        // localStorage can be unavailable in private mode.
+    }
+}
+
 export function promptGame(config) {
+    const dismissedKey = `prompt:dismissed:${config.stateUrl}`;
+
     return {
         status: 'lobby',
         hasActivePhoto: false,
@@ -19,7 +43,7 @@ export function promptGame(config) {
         error: '',
         loading: false,
         flashedWord: '',
-        dismissedRoundId: null,
+        dismissedRoundId: readDismissedRound(dismissedKey),
         barReady: false,
         similarityShown: 0,
         pollId: null,
@@ -665,6 +689,7 @@ export function promptGame(config) {
 
         backToLobby() {
             this.dismissedRoundId = this.round?.id ?? null;
+            storeDismissedRound(dismissedKey, this.dismissedRoundId);
             this.status = 'lobby';
             this.barReady = false;
         },

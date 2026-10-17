@@ -342,6 +342,37 @@ class PromptGameTest extends TestCase
         ]);
     }
 
+    public function test_changing_active_photo_hides_finished_round(): void
+    {
+        Storage::fake('public');
+
+        $room = Room::query()->create(['key' => 'demo']);
+
+        $this->post("/host/{$room->key}/photos", [
+            'photos' => [
+                UploadedFile::fake()->image('one.jpg', 200, 200),
+                UploadedFile::fake()->image('two.jpg', 200, 200),
+            ],
+        ])->assertRedirect();
+
+        [$first, $second] = $room->photos()->orderBy('id')->get()->all();
+
+        $this->post("/host/{$room->key}/photos/{$first->id}/activate")->assertRedirect();
+        $this->postJson("/play/{$room->key}/start")->assertOk();
+        $this->postJson("/play/{$room->key}/submit", ['prompt' => 'синий дом'])->assertOk();
+        $this->postJson("/play/{$room->key}/generate")->assertJsonPath('status', 'done');
+
+        $this->getJson("/play/{$room->key}/state")->assertJsonPath('status', 'done');
+
+        $this->post("/host/{$room->key}/photos/{$second->id}/activate")->assertRedirect();
+
+        $this->getJson("/play/{$room->key}/state")
+            ->assertOk()
+            ->assertJsonPath('status', 'lobby')
+            ->assertJsonPath('round', null)
+            ->assertJsonPath('can_start', true);
+    }
+
     public function test_host_can_delete_a_forbidden_word(): void
     {
         Storage::fake('public');

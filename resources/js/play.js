@@ -23,6 +23,8 @@ export function promptGame(config) {
         barReady: false,
         similarityShown: 0,
         pollId: null,
+        refreshing: false,
+        failedRefreshes: 0,
         listening: false,
         speechSupported: Boolean(
             window.SpeechRecognition || window.webkitSpeechRecognition || (window.MediaRecorder && navigator.mediaDevices),
@@ -88,11 +90,28 @@ export function promptGame(config) {
         },
 
         async refresh() {
+            if (this.refreshing) {
+                return;
+            }
+
+            this.refreshing = true;
+
             try {
-                const response = await window.axios.get(config.stateUrl);
+                const response = await window.axios.get(config.stateUrl, { timeout: 10000 });
                 this.applyState(response.data);
-            } catch (error) {
-                this.error = error.response?.data?.message || this.strings.state_error || '';
+                this.failedRefreshes = 0;
+
+                if (this.error === this.strings.state_error) {
+                    this.error = '';
+                }
+            } catch {
+                this.failedRefreshes += 1;
+
+                if (this.failedRefreshes >= 3) {
+                    this.error = this.strings.state_error || '';
+                }
+            } finally {
+                this.refreshing = false;
             }
         },
 
@@ -595,6 +614,47 @@ export function promptGame(config) {
                 const response = await window.axios.post(config.resetUrl, {}, {
                     headers: { 'X-CSRF-TOKEN': csrfToken() },
                 });
+                this.applyState(response.data);
+            } catch (error) {
+                this.error = error.response?.data?.message || this.strings.reset_error || '';
+            } finally {
+                this.loading = false;
+            }
+        },
+
+        async goBack() {
+            if (this.loading || this.transcribing) {
+                return;
+            }
+
+            const status = this.viewStatus;
+
+            if (status === 'lobby') {
+                window.location.href = config.homeUrl;
+                return;
+            }
+
+            if (status === 'done') {
+                this.backToLobby();
+                return;
+            }
+
+            const spoken = this.round?.prompt_raw || this.spokenRaw;
+            this.stopMic();
+            this.loading = true;
+            this.error = '';
+
+            try {
+                const response = await window.axios.post(config.backUrl, {}, {
+                    headers: { 'X-CSRF-TOKEN': csrfToken() },
+                });
+
+                if (status === 'prompted') {
+                    this.editRoundId = null;
+                    this.secondsLeft = this.recordLimit;
+                    this.applySpokenText(spoken);
+                }
+
                 this.applyState(response.data);
             } catch (error) {
                 this.error = error.response?.data?.message || this.strings.reset_error || '';

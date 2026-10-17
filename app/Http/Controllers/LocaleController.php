@@ -12,9 +12,18 @@ class LocaleController extends Controller
     {
         $data = $request->validate([
             'locale' => ['required', 'string', 'in:'.implode(',', SetLocale::LOCALES)],
+            'scope' => ['nullable', 'string', 'in:'.implode(',', SetLocale::SCOPES)],
         ]);
 
-        $request->session()->put('locale', $data['locale']);
+        $scope = $data['scope'] ?? null;
+
+        $request->session()->put(SetLocale::sessionKey($scope), $data['locale']);
+
+        if ($scope === null) {
+            foreach (SetLocale::SCOPES as $roleScope) {
+                $request->session()->forget(SetLocale::sessionKey($roleScope));
+            }
+        }
 
         return back();
     }

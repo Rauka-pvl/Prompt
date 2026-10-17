@@ -230,6 +230,19 @@ class PlayController extends Controller
         return $this->state($room->fresh());
     }
 
+    public function back(Room $room): JsonResponse
+    {
+        $round = $room->currentRound();
+
+        if ($round?->status === Round::STATUS_PROMPTED) {
+            $round->update(['status' => Round::STATUS_PLAYING]);
+        } elseif ($round?->status === Round::STATUS_PLAYING) {
+            $room->cancelOpenRounds();
+        }
+
+        return $this->state($room->fresh());
+    }
+
     public function reset(Room $room): JsonResponse
     {
         $room->cancelOpenRounds();

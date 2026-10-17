@@ -3,6 +3,9 @@
         <form action="{{ route('locale') }}" method="POST">
             @csrf
             <input type="hidden" name="locale" value="{{ $code }}">
+            @if ($localeScope ?? null)
+                <input type="hidden" name="scope" value="{{ $localeScope }}">
+            @endif
             <button
                 type="submit"
                 class="rounded-full px-2.5 py-1 transition {{ app()->getLocale() === $code ? 'bg-gold text-black' : 'text-white/55 hover:text-white' }}"

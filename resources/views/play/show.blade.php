@@ -7,14 +7,31 @@
 
 @section('header')
     <header class="play-header">
-        <a href="{{ route('home') }}" class="font-display text-xl font-extrabold text-gold">{{ __('messages.game.title') }}</a>
+        <div class="flex min-w-0 items-center gap-3">
+            <button
+                type="button"
+                class="play-back"
+                x-data
+                @click="$dispatch('play-back')"
+                aria-label="{{ __('messages.play.back') }}"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M15 18l-6-6 6-6"/>
+                </svg>
+                <span>{{ __('messages.play.back') }}</span>
+            </button>
+            <a href="{{ route('home') }}" class="truncate font-display text-xl font-extrabold text-gold">{{ __('messages.game.title') }}</a>
+        </div>
         @include('partials.locale-switcher')
     </header>
 @endsection
 
 @section('content')
     <div
+        @play-back.window="goBack()"
         x-data="promptGame({
+            homeUrl: @js(route('home')),
+            backUrl: @js(route('play.back', $room)),
             stateUrl: @js(route('play.state', $room)),
             startUrl: @js(route('play.start', $room)),
             transcribeUrl: @js(route('play.transcribe', $room)),

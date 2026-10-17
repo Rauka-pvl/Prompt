@@ -28,6 +28,7 @@ Route::prefix('play/{room}')->name('play.')->group(function () {
     Route::post('/submit', [PlayController::class, 'submit'])->name('submit');
     Route::post('/generate', [PlayController::class, 'generate'])->name('generate');
     Route::post('/reset', [PlayController::class, 'reset'])->name('reset');
+    Route::post('/back', [PlayController::class, 'back'])->name('back');
 });
 
 Route::prefix('admin')->name('admin.')->group(function () {

@@ -68,6 +68,59 @@ class PromptGameTest extends TestCase
             ->assertSee('Опиши фото.', false);
     }
 
+    public function test_host_and_player_keep_separate_languages(): void
+    {
+        $room = Room::query()->create(['key' => 'demo']);
+
+        $this->from("/host/{$room->key}")->post('/locale', ['locale' => 'kk', 'scope' => 'host'])
+            ->assertRedirect("/host/{$room->key}");
+        $this->from("/play/{$room->key}")->post('/locale', ['locale' => 'ru', 'scope' => 'play'])
+            ->assertRedirect("/play/{$room->key}");
+
+        $this->get("/host/{$room->key}")->assertOk()->assertSee('Жүргізуші кабинеті', false);
+        $this->get("/play/{$room->key}")->assertOk()->assertSee('Экран участника', false)->assertSee('ru-RU', false);
+
+        $this->from("/play/{$room->key}")->post('/locale', ['locale' => 'kk', 'scope' => 'play']);
+
+        $this->get("/play/{$room->key}")->assertOk()->assertSee('Ойыншы экраны', false)->assertSee('kk-KZ', false);
+        $this->get("/host/{$room->key}")->assertOk()->assertSee('Жүргізуші кабинеті', false);
+
+        $this->from('/')->post('/locale', ['locale' => 'ru']);
+
+        $this->get("/host/{$room->key}")->assertOk()->assertSee('Кабинет ведущего', false);
+        $this->get("/play/{$room->key}")->assertOk()->assertSee('Экран участника', false);
+    }
+
+    public function test_player_back_button_steps_back_through_the_round(): void
+    {
+        Storage::fake('public');
+
+        $room = Room::query()->create(['key' => 'demo']);
+
+        $this->post("/host/{$room->key}/photos", [
+            'photos' => [UploadedFile::fake()->image('car.jpg', 200, 200)],
+        ])->assertRedirect();
+
+        $photo = $room->photos()->firstOrFail();
+        $this->post("/host/{$room->key}/photos/{$photo->id}/activate")->assertRedirect();
+
+        $this->postJson("/play/{$room->key}/start")->assertJsonPath('status', 'playing');
+        $this->postJson("/play/{$room->key}/submit", ['prompt' => 'старая машина'])
+            ->assertJsonPath('status', 'prompted');
+
+        $this->postJson("/play/{$room->key}/back")
+            ->assertOk()
+            ->assertJsonPath('status', 'playing')
+            ->assertJsonPath('round.prompt_raw', 'старая машина');
+
+        $this->postJson("/play/{$room->key}/submit", ['prompt' => 'новая машина'])
+            ->assertJsonPath('status', 'prompted')
+            ->assertJsonPath('round.prompt_clean', 'новая машина');
+
+        $this->postJson("/play/{$room->key}/back")->assertJsonPath('status', 'playing');
+        $this->postJson("/play/{$room->key}/back")->assertJsonPath('status', 'lobby');
+    }
+
     public function test_invalid_locale_is_rejected(): void
     {
         $this->from('/')->post('/locale', ['locale' => 'en'])

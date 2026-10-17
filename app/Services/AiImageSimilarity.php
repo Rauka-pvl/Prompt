@@ -8,11 +8,21 @@ use RuntimeException;
 
 class AiImageSimilarity
 {
-    private const SYSTEM_PROMPT = 'You are a strict judge in a party game. Players describe a photo in words, an AI draws a picture from the description, and you score how close the drawing is to the original photo. Answer with a single integer from 0 to 100 and nothing else.';
+    private const SYSTEM_PROMPT = 'You are a fair judge in a party game. Players describe a photo in words, an AI draws a picture from the description, and you score how close the drawing is to the original photo. Judge what a person would notice at a glance, not pixel details. Answer with a single integer from 0 to 100 and nothing else.';
 
-    private const PROMPT = 'Image 1 is the original photo. Image 2 is the generated attempt. Rate their similarity from 0 to 100, weighing: main subject and objects (50%), composition and layout (25%), colors and lighting (15%), style and mood (10%). 0 means unrelated, 100 means practically the same picture. Reply with the number only.';
+    private const PROMPT = <<<'TXT'
+Image 1 is the original photo. Image 2 is the generated attempt.
+Weigh: main subject (50%), composition and pose (25%), colors and lighting (15%), setting and mood (10%).
+Calibration:
+90-100: almost the same picture.
+75-89: same kind of subject in a similar scene, only minor differences (model, breed, small objects).
+55-74: same kind of subject, but clear differences in pose, setting or colors.
+30-54: different subject, but similar scene, composition or colors.
+0-29: mostly unrelated.
+Reply with the number only.
+TXT;
 
-    public function compare(string $originalPath, string $generatedPath): float
+    public function compare(string $originalPath, string $generatedPath, ?string $model = null): float
     {
         $key = (string) config('prompt.fal_key');
 
@@ -20,11 +30,11 @@ class AiImageSimilarity
             throw new RuntimeException('FAL_KEY is not set.');
         }
 
-        $response = Http::timeout(60)
+        $response = Http::timeout(45)
             ->acceptJson()
             ->withToken($key, 'Key')
             ->post('https://fal.run/openrouter/router/vision', [
-                'model' => (string) config('prompt.similarity_ai_model'),
+                'model' => $model ?? (string) config('prompt.similarity_ai_model'),
                 'system_prompt' => self::SYSTEM_PROMPT,
                 'prompt' => self::PROMPT,
                 'image_urls' => [

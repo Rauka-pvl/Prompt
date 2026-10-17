@@ -271,8 +271,9 @@ class PromptGameTest extends TestCase
             ->assertJsonPath('text', 'Көк машина рядом серая стена');
 
         Http::assertSent(fn ($request) => str_contains($request->url(), 'fal.run/fal-ai/elevenlabs/speech-to-text')
-            && $request['audio_url'] === 'https://v3b.fal.media/files/speech.webm'
+            && str_starts_with($request['audio_url'], 'data:audio/')
             && ! isset($request['language_code']));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'storage/upload'));
     }
 
     public function test_transcription_falls_back_to_whisper(): void
@@ -303,6 +304,88 @@ class PromptGameTest extends TestCase
         $this->post("/play/{$room->key}/transcribe", [
             'audio' => UploadedFile::fake()->create('speech.webm', 40, 'audio/webm'),
         ])->assertOk()->assertJsonPath('text', 'Қызыл үй.');
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'fal.run/fal-ai/whisper')
+            && $request['audio_url'] === 'https://v3b.fal.media/files/speech.webm');
+    }
+
+    public function test_prompt_is_translated_and_similarity_is_judged_by_ai_with_backup(): void
+    {
+        Storage::fake('public');
+        config(['prompt.fal_key' => 'test-key']);
+
+        $png = UploadedFile::fake()->image('out.png', 64, 64)->getContent();
+
+        Http::fake([
+            'fal.run/openrouter/router' => Http::response(['output' => 'A blue old car near a gray wall']),
+            'fal.run/fal-ai/flux/*' => Http::response(['images' => [['url' => 'https://v3b.fal.media/files/out.png']]]),
+            'v3b.fal.media/*' => Http::response($png),
+            'fal.run/openrouter/router/vision' => Http::sequence()
+                ->push(['detail' => 'down'], 500)
+                ->push(['detail' => 'down'], 500)
+                ->push(['output' => '72']),
+        ]);
+
+        $room = $this->roomWithActivePhoto();
+
+        $this->postJson("/play/{$room->key}/start")->assertOk();
+        $this->postJson("/play/{$room->key}/submit", ['prompt' => 'синяя старая машина'])->assertOk();
+
+        $this->postJson("/play/{$room->key}/generate")
+            ->assertOk()
+            ->assertJsonPath('status', 'done')
+            ->assertJsonPath('round.similarity', 72);
+
+        Http::assertSent(fn ($request) => str_contains($request->url(), 'fal-ai/flux/')
+            && str_starts_with($request['prompt'], 'A blue old car near a gray wall'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), 'router/vision')
+            && $request['model'] === 'openai/gpt-4o-mini');
+    }
+
+    public function test_failed_similarity_keeps_generated_image_for_retry(): void
+    {
+        Storage::fake('public');
+        config(['prompt.fal_key' => 'test-key', 'prompt.translate_enabled' => false]);
+
+        $png = UploadedFile::fake()->image('out.png', 64, 64)->getContent();
+
+        Http::fake([
+            'fal.run/fal-ai/flux/*' => Http::response(['images' => [['url' => 'https://v3b.fal.media/files/out.png']]]),
+            'v3b.fal.media/*' => Http::response($png),
+            'fal.run/openrouter/router/vision' => Http::sequence()
+                ->push(['detail' => 'down'], 500)
+                ->push(['detail' => 'down'], 500)
+                ->push(['detail' => 'down'], 500)
+                ->push(['output' => '64']),
+        ]);
+
+        $room = $this->roomWithActivePhoto();
+
+        $this->postJson("/play/{$room->key}/start")->assertOk();
+        $this->postJson("/play/{$room->key}/submit", ['prompt' => 'машина'])->assertOk();
+
+        $this->postJson("/play/{$room->key}/generate")->assertStatus(502);
+        $this->getJson("/play/{$room->key}/state")->assertJsonPath('status', 'prompted');
+
+        $this->postJson("/play/{$room->key}/generate", ['prompt' => 'машина'])
+            ->assertOk()
+            ->assertJsonPath('round.similarity', 64);
+
+        Http::assertSentCount(1 + 1 + 4);
+    }
+
+    private function roomWithActivePhoto(): Room
+    {
+        $room = Room::query()->create(['key' => 'demo']);
+
+        $this->post("/host/{$room->key}/photos", [
+            'photos' => [UploadedFile::fake()->image('car.jpg', 200, 200)],
+        ])->assertRedirect();
+
+        $photo = $room->photos()->firstOrFail();
+        $this->post("/host/{$room->key}/photos/{$photo->id}/activate")->assertRedirect();
+
+        return $room;
     }
 
     public function test_changing_active_photo_cancels_open_round(): void

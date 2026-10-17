@@ -155,6 +155,7 @@ class PlayController extends Controller
         $round->update([
             'prompt_raw' => $data['prompt'],
             'prompt_clean' => $clean,
+            'generated_path' => null,
             'status' => Round::STATUS_PROMPTED,
         ]);
 
@@ -191,35 +192,51 @@ class PlayController extends Controller
                 ], 422);
             }
 
-            $round->update(['prompt_clean' => $clean]);
+            if ($clean !== $round->prompt_clean) {
+                $round->update(['prompt_clean' => $clean, 'generated_path' => null]);
+            }
+        }
+
+        $generatedPath = $round->generated_path;
+
+        if (! $generatedPath || ! Storage::disk('public')->exists($generatedPath)) {
+            try {
+                $generatedPath = $generator->generate(
+                    (string) $round->prompt_clean,
+                    'rooms/'.$room->id.'/generated',
+                    $round->photo->absolutePath()
+                );
+            } catch (\Throwable $exception) {
+                report($exception);
+
+                return response()->json([
+                    'message' => $exception instanceof \RuntimeException
+                        ? $exception->getMessage()
+                        : __('messages.play.error_generate_failed'),
+                ], 502);
+            }
+
+            $round->refresh();
+
+            if ($round->status !== Round::STATUS_PROMPTED) {
+                return $this->state($room->fresh());
+            }
+
+            $round->update(['generated_path' => $generatedPath]);
         }
 
         try {
-            $generatedPath = $generator->generate(
-                (string) $round->prompt_clean,
-                'rooms/'.$room->id.'/generated',
-                $round->photo->absolutePath()
+            $score = $similarity->compare(
+                $round->photo->absolutePath(),
+                Storage::disk('public')->path($generatedPath)
             );
         } catch (\Throwable $exception) {
             report($exception);
 
             return response()->json([
-                'message' => $exception instanceof \RuntimeException
-                    ? $exception->getMessage()
-                    : __('messages.play.error_generate_failed'),
+                'message' => __('messages.play.error_similarity_failed'),
             ], 502);
         }
-
-        $round->refresh();
-
-        if ($round->status !== Round::STATUS_PROMPTED) {
-            return $this->state($room->fresh());
-        }
-
-        $score = $similarity->compare(
-            $round->photo->absolutePath(),
-            Storage::disk('public')->path($generatedPath)
-        );
 
         DB::transaction(function () use ($room, $round, $generatedPath, $score) {
             $round->update([

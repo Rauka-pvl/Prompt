@@ -11,6 +11,8 @@ use RuntimeException;
 
 class FalAiImageGenerator implements ImageGenerator
 {
+    public function __construct(private readonly PromptTranslator $translator) {}
+
     public function generate(string $prompt, string $directory, ?string $referencePath = null): string
     {
         $key = (string) config('prompt.fal_key');
@@ -18,6 +20,8 @@ class FalAiImageGenerator implements ImageGenerator
         if ($key === '') {
             throw new RuntimeException('FAL_KEY is not set.');
         }
+
+        $prompt = $this->translator->toEnglish($prompt);
 
         if ($referencePath !== null && config('prompt.reference_enabled')) {
             $model = trim((string) config('prompt.reference_model'), '/');

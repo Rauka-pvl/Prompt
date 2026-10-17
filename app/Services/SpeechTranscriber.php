@@ -22,7 +22,11 @@ class SpeechTranscriber
             throw new RuntimeException('FAL_KEY is not set.');
         }
 
-        $audioUrl = $this->upload($key, $audio);
+        [$mime, $extension] = $this->audioType($audio);
+        $body = (string) file_get_contents($audio->getRealPath());
+        $dataUri = 'data:'.$mime.';base64,'.base64_encode($body);
+        $hostedUrl = null;
+
         $models = array_values(array_unique(array_filter([
             (string) config('prompt.stt_model'),
             (string) config('prompt.stt_fallback_model'),
@@ -31,8 +35,15 @@ class SpeechTranscriber
         $lastError = null;
 
         foreach ($models as $model) {
+            $model = trim($model, '/');
+
             try {
-                $text = $this->callModel($key, trim($model, '/'), $audioUrl);
+                // Uploading to fal storage costs several seconds, so only Whisper (which rejects data URIs) gets it.
+                $audioUrl = str_contains($model, 'whisper')
+                    ? ($hostedUrl ??= $this->upload($key, $body, $mime, $extension))
+                    : $dataUri;
+
+                $text = $this->callModel($key, $model, $audioUrl);
 
                 if ($text !== '') {
                     return $text;
@@ -61,7 +72,7 @@ class SpeechTranscriber
                 'diarize' => false,
             ];
 
-        $response = Http::timeout(60)
+        $response = Http::timeout(40)
             ->acceptJson()
             ->withToken($key, 'Key')
             ->post('https://fal.run/'.$model, $payload);
@@ -81,9 +92,9 @@ class SpeechTranscriber
     }
 
     /**
-     * Whisper on fal rejects data URIs, so the recording goes to fal storage first.
+     * @return array{0: string, 1: string}
      */
-    private function upload(string $key, UploadedFile $audio): string
+    private function audioType(UploadedFile $audio): array
     {
         $mime = $audio->getMimeType() ?: 'audio/webm';
 
@@ -99,8 +110,11 @@ class SpeechTranscriber
             default => 'm4a',
         };
 
-        $body = (string) file_get_contents($audio->getRealPath());
+        return [$mime, $extension];
+    }
 
+    private function upload(string $key, string $body, string $mime, string $extension): string
+    {
         $initiate = Http::timeout(20)
             ->acceptJson()
             ->withToken($key, 'Key')

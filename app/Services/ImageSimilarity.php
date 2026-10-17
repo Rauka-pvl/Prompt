@@ -13,52 +13,32 @@ class ImageSimilarity
 
     public function __construct(private readonly AiImageSimilarity $ai) {}
 
+    /**
+     * Always judged by AI. Without a fal key (local tests with the mock generator)
+     * the perceptual score is used instead.
+     */
     public function compare(string $pathA, string $pathB): float
-    {
-        return match (config('prompt.similarity')) {
-            'pixel' => $this->pixel($pathA, $pathB),
-            'perceptual' => $this->perceptual($pathA, $pathB),
-            default => $this->viaAi($pathA, $pathB),
-        };
-    }
-
-    public function viaAi(string $pathA, string $pathB): float
     {
         if (blank(config('prompt.fal_key'))) {
             return $this->perceptual($pathA, $pathB);
         }
 
-        try {
-            return $this->ai->compare($pathA, $pathB);
-        } catch (\Throwable $exception) {
-            report($exception);
+        $main = (string) config('prompt.similarity_ai_model');
+        $backup = (string) config('prompt.similarity_ai_backup_model');
+        $models = array_filter([$main, $main, $backup !== $main ? $backup : '']);
 
-            return $this->perceptual($pathA, $pathB);
-        }
-    }
+        $lastError = null;
 
-    /**
-     * Average RGB distance between 32×32 thumbnails.
-     */
-    public function pixel(string $pathA, string $pathB): float
-    {
-        $a = $this->sample($pathA, self::SAMPLE, self::SAMPLE);
-        $b = $this->sample($pathB, self::SAMPLE, self::SAMPLE);
-
-        $distance = 0.0;
-        $pixels = self::SAMPLE * self::SAMPLE;
-
-        for ($i = 0; $i < $pixels; $i++) {
-            $distance += hypot(
-                hypot($a[$i][0] - $b[$i][0], $a[$i][1] - $b[$i][1]),
-                $a[$i][2] - $b[$i][2]
-            );
+        foreach ($models as $model) {
+            try {
+                return $this->ai->compare($pathA, $pathB, $model);
+            } catch (\Throwable $exception) {
+                report($exception);
+                $lastError = $exception;
+            }
         }
 
-        $maxDistance = $pixels * hypot(hypot(255, 255), 255);
-        $similarity = (1 - ($distance / $maxDistance)) * 100;
-
-        return round(max(0, min(100, $similarity)), 2);
+        throw new RuntimeException(__('messages.play.error_similarity_failed'), 0, $lastError);
     }
 
     /**

@@ -6,6 +6,8 @@ function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const recordTailMs = 700;
+
 function readDismissedRound(key) {
     try {
         const value = Number(window.localStorage.getItem(key));
@@ -298,7 +300,7 @@ export function promptGame(config) {
 
             try {
                 this.mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+                    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
                 });
             } catch {
                 this.error = this.strings.mic_denied || '';
@@ -325,8 +327,10 @@ export function promptGame(config) {
             const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
                 .find((type) => window.MediaRecorder.isTypeSupported?.(type));
 
+            const options = { audioBitsPerSecond: 24000, ...(mimeType ? { mimeType } : {}) };
+
             try {
-                this.recorder = new MediaRecorder(this.mediaStream, mimeType ? { mimeType } : undefined);
+                this.recorder = new MediaRecorder(this.mediaStream, options);
             } catch {
                 this.recorder = null;
                 return;
@@ -373,15 +377,19 @@ export function promptGame(config) {
 
             this.clearRecordTimer();
             this.listening = false;
-
-            if (this.interimText) {
-                this.applySpokenText(`${this.spokenRaw} ${this.interimText}`);
-            }
-
-            this.interimText = '';
-            this.detachRecognition();
+            this.transcribing = true;
 
             this.transcribeTask = (async () => {
+                // The last word is usually still being spoken when the player taps stop.
+                await new Promise((resolve) => setTimeout(resolve, recordTailMs));
+
+                if (this.interimText) {
+                    this.applySpokenText(`${this.spokenRaw} ${this.interimText}`);
+                }
+
+                this.interimText = '';
+                this.detachRecognition();
+
                 const blob = await this.stopRecorder();
                 this.releaseStream();
 
@@ -389,6 +397,7 @@ export function promptGame(config) {
                     await this.transcribe(blob);
                 }
             })().finally(() => {
+                this.transcribing = false;
                 this.transcribeTask = null;
             });
 

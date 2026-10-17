@@ -76,18 +76,17 @@ class FalAiImageGenerator implements ImageGenerator
     }
 
     /**
-     * Weak player prompts must not derail the scene: the reference photo
-     * carries the subject, the prompt only steers details.
+     * The player's description leads; the reference photo only loosely
+     * suggests the overall scene so weak prompts still land nearby.
      */
     private function anchorPrompt(string $prompt): string
     {
         $prompt = trim($prompt);
 
         if ($prompt === '') {
-            return 'Recreate the reference photo exactly.';
+            return 'A photo loosely inspired by the reference image.';
         }
 
-        return "Recreate the same scene as the reference photo with these details: {$prompt}. "
-            .'Keep the same subject, setting and composition as the reference.';
+        return "{$prompt}. Photo, loosely inspired by the general scene of the reference image.";
     }
 }

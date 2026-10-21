@@ -9,6 +9,7 @@ use App\Models\Round;
 use App\Services\ForbiddenWordFilter;
 use App\Services\ImageSimilarity;
 use App\Services\SpeechTranscriber;
+use App\Support\ImageSize;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -204,7 +205,7 @@ class PlayController extends Controller
                 $generatedPath = $generator->generate(
                     (string) $round->prompt_clean,
                     'rooms/'.$room->id.'/generated',
-                    $round->photo->absolutePath()
+                    ImageSize::presetFor($round->photo->absolutePath())
                 );
             } catch (\Throwable $exception) {
                 report($exception);

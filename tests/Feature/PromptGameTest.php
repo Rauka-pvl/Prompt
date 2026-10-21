@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Room;
 use App\Services\ForbiddenWordFilter;
+use App\Services\SpeechTranscriber;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Http;
@@ -77,12 +78,14 @@ class PromptGameTest extends TestCase
         $this->from("/play/{$room->key}")->post('/locale', ['locale' => 'ru', 'scope' => 'play'])
             ->assertRedirect("/play/{$room->key}");
 
-        $this->get("/host/{$room->key}")->assertOk()->assertSee('Жүргізуші кабинеті', false);
-        $this->get("/play/{$room->key}")->assertOk()->assertSee('Экран участника', false)->assertSee('ru-RU', false);
+        $this->get("/host/{$room->key}")->assertOk()
+            ->assertSee('Жүргізуші кабинеті', false)
+            ->assertSee('href="'.route('play.show', $room).'" target="_blank" rel="noopener"', false);
+        $this->get("/play/{$room->key}")->assertOk()->assertSee('Экран участника', false)->assertSee('Вы говорите', false);
 
         $this->from("/play/{$room->key}")->post('/locale', ['locale' => 'kk', 'scope' => 'play']);
 
-        $this->get("/play/{$room->key}")->assertOk()->assertSee('Ойыншы экраны', false)->assertSee('kk-KZ', false);
+        $this->get("/play/{$room->key}")->assertOk()->assertSee('Ойыншы экраны', false)->assertSee('Сіз айтып жатырсыз', false);
         $this->get("/host/{$room->key}")->assertOk()->assertSee('Жүргізуші кабинеті', false);
 
         $this->from('/')->post('/locale', ['locale' => 'ru']);
@@ -127,14 +130,14 @@ class PromptGameTest extends TestCase
             ->assertSessionHasErrors('locale');
     }
 
-    public function test_play_page_uses_kazakh_speech_locale(): void
+    public function test_play_page_is_translated_to_kazakh(): void
     {
         $room = Room::query()->create(['key' => 'demo']);
 
         $this->withSession(['locale' => 'kk'])
             ->get("/play/{$room->key}")
             ->assertOk()
-            ->assertSee('kk-KZ', false)
+            ->assertSee('Белгіленген сөздерге тыйым салынған', false)
             ->assertSee('Ойыншы экраны', false)
             ->assertSee('Промпт құрастыр', false)
             ->assertSee('Промптылар', false)
@@ -309,6 +312,35 @@ class PromptGameTest extends TestCase
             && $request['audio_url'] === 'https://v3b.fal.media/files/speech.webm');
     }
 
+    public function test_silent_chunk_returns_empty_text_without_whisper_fallback(): void
+    {
+        Storage::fake('public');
+        config(['prompt.fal_key' => 'test-key']);
+
+        Http::fake([
+            'fal.run/fal-ai/elevenlabs/*' => Http::response(['text' => ' (silence) ']),
+            'fal.run/fal-ai/whisper' => Http::response(['text' => 'Продолжение следует...']),
+        ]);
+
+        $room = $this->roomWithActivePhoto();
+        $this->postJson("/play/{$room->key}/start")->assertOk();
+
+        $this->post("/play/{$room->key}/transcribe", [
+            'audio' => UploadedFile::fake()->create('speech.webm', 40, 'audio/webm'),
+        ])->assertOk()->assertJsonPath('text', '');
+
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), 'whisper'));
+    }
+
+    public function test_transcriber_strips_hallucinated_phrases(): void
+    {
+        $transcriber = app(SpeechTranscriber::class);
+
+        $this->assertSame('Хомяк сидит в офисе.', $transcriber->normalize('Хомяк сидит в офисе. Продолжение следует...'));
+        $this->assertSame('', $transcriber->normalize('Субтитры сделал DimaTorzok'));
+        $this->assertSame('Көк машина', $transcriber->normalize('Көк машина [music] Thanks for watching!'));
+    }
+
     public function test_prompt_is_translated_and_similarity_is_judged_by_ai_with_backup(): void
     {
         Storage::fake('public');
@@ -326,7 +358,7 @@ class PromptGameTest extends TestCase
                 ->push(['output' => '72']),
         ]);
 
-        $room = $this->roomWithActivePhoto();
+        $room = $this->roomWithActivePhoto(400, 300);
 
         $this->postJson("/play/{$room->key}/start")->assertOk();
         $this->postJson("/play/{$room->key}/submit", ['prompt' => 'синяя старая машина'])->assertOk();
@@ -336,8 +368,10 @@ class PromptGameTest extends TestCase
             ->assertJsonPath('status', 'done')
             ->assertJsonPath('round.similarity', 72);
 
-        Http::assertSent(fn ($request) => str_contains($request->url(), 'fal-ai/flux/')
-            && str_starts_with($request['prompt'], 'A blue old car near a gray wall'));
+        Http::assertSent(fn ($request) => str_ends_with($request->url(), 'fal-ai/flux/dev')
+            && $request['prompt'] === 'A blue old car near a gray wall'
+            && $request['image_size'] === 'landscape_4_3'
+            && ! isset($request['image_url']));
         Http::assertSent(fn ($request) => str_ends_with($request->url(), 'router/vision')
             && $request['model'] === 'openai/gpt-4o-mini');
     }
@@ -374,12 +408,12 @@ class PromptGameTest extends TestCase
         Http::assertSentCount(1 + 1 + 4);
     }
 
-    private function roomWithActivePhoto(): Room
+    private function roomWithActivePhoto(int $width = 200, int $height = 200): Room
     {
         $room = Room::query()->create(['key' => 'demo']);
 
         $this->post("/host/{$room->key}/photos", [
-            'photos' => [UploadedFile::fake()->image('car.jpg', 200, 200)],
+            'photos' => [UploadedFile::fake()->image('car.jpg', $width, $height)],
         ])->assertRedirect();
 
         $photo = $room->photos()->firstOrFail();
@@ -505,7 +539,7 @@ class PromptGameTest extends TestCase
         );
 
         $this->assertSame(
-            ', , . котлета и который',
+            'котлета и который',
             $filter->clean('Кота, котики, котом. котлета и который', ['кот'])
         );
 
@@ -520,5 +554,40 @@ class PromptGameTest extends TestCase
         );
 
         $this->assertSame('', $filter->clean('ёлки елку', ['ёлка']));
+    }
+
+    public function test_forbidden_word_filter_keeps_unrelated_words(): void
+    {
+        $filter = new ForbiddenWordFilter;
+
+        $blocked = [
+            'кот' => 'кота коту котом котик коты',
+            'голубой' => 'голубая голубого голубые',
+            'хомяк' => 'хомяка хомяки хомяком',
+            'мысық' => 'мысығы мысықтар мысықпен',
+            'көк' => 'көгі көкте',
+            'машина' => 'машину машинаға машиналар',
+            'мышь' => 'мыши мышка',
+        ];
+
+        foreach ($blocked as $word => $text) {
+            $this->assertSame('', $filter->clean($text, [$word]), "«{$word}» must block «{$text}»");
+        }
+
+        $kept = [
+            'кот' => 'котлета который',
+            'дом' => 'домино',
+            'стол' => 'столовая столетний',
+            'сидит' => 'сиденье',
+            'көк' => 'көктем көкөніс',
+            'ақ' => 'ақша ақын',
+            'бал' => 'балық балкон',
+            'мышь' => 'мышцы мышление',
+            'машина' => 'машинист машинально',
+        ];
+
+        foreach ($kept as $word => $text) {
+            $this->assertSame($text, $filter->clean($text, [$word]), "«{$word}» must keep «{$text}»");
+        }
     }
 }

@@ -12,7 +12,24 @@ use RuntimeException;
  */
 class SpeechTranscriber
 {
-    private const WHISPER_HINT = 'Қазақша және орысша аралас сөйлеу. Смешанная речь на казахском и русском языках. Фотоны сипаттау: машина, үй, адам, түсі.';
+    // Kept short: Whisper tends to echo long prompts back on quiet audio.
+    private const WHISPER_HINT = 'Қазақша және орысша сөйлеу.';
+
+    /** Phrases speech models invent on silence or noise (subtitle credits, video outros). */
+    private const HALLUCINATIONS = [
+        '/продолжение следует\.*/iu',
+        '/субтитры (?:сделал|создавал|подготовил|делал)[^.!?]*[.!?]?/iu',
+        '/(?:редактор|корректор) субтитров[^.!?]*[.!?]?/iu',
+        '/спасибо за (?:просмотр|внимание)[.!]?/iu',
+        '/подписывайтесь на (?:наш )?канал[^.!?]*[.!?]?/iu',
+        '/ставьте лайки?[^.!?]*[.!?]?/iu',
+        '/thanks? (?:you )?for watching[.!]?/iu',
+        '/subtitles? by[^.!?]*[.!?]?/iu',
+        '/amara\.org[^.!?]*[.!?]?/iu',
+        '/dimatorzok/iu',
+        '/қазақша және орысша сөйлеу\.?/iu',
+        '/көргеніңізге рахмет[.!]?/iu',
+    ];
 
     public function transcribe(UploadedFile $audio): string
     {
@@ -43,18 +60,15 @@ class SpeechTranscriber
                     ? ($hostedUrl ??= $this->upload($key, $body, $mime, $extension))
                     : $dataUri;
 
-                $text = $this->callModel($key, $model, $audioUrl);
-
-                if ($text !== '') {
-                    return $text;
-                }
+                // An empty answer means silence; falling back would only invite Whisper to invent words.
+                return $this->callModel($key, $model, $audioUrl);
             } catch (\Throwable $exception) {
                 report($exception);
                 $lastError = $exception;
             }
         }
 
-        throw $lastError ?? new RuntimeException('Empty transcription.');
+        throw $lastError ?? new RuntimeException('No speech-to-text model configured.');
     }
 
     private function callModel(string $key, string $model, string $audioUrl): string
@@ -84,11 +98,13 @@ class SpeechTranscriber
         return $this->normalize((string) data_get($response->json(), 'text', ''));
     }
 
-    private function normalize(string $text): string
+    public function normalize(string $text): string
     {
         $text = preg_replace('/\([^)]*\)|\[[^\]]*\]/u', ' ', $text) ?? $text;
+        $text = preg_replace(self::HALLUCINATIONS, ' ', $text) ?? $text;
+        $text = trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
 
-        return trim(preg_replace('/\s+/u', ' ', $text) ?? $text);
+        return preg_match('/[\p{L}\p{N}]/u', $text) ? $text : '';
     }
 
     /**

@@ -38,8 +38,6 @@
             submitUrl: @js(route('play.submit', $room)),
             generateUrl: @js(route('play.generate', $room)),
             resetUrl: @js(route('play.reset', $room)),
-            lang: @js(app()->getLocale() === 'kk' ? 'kk-KZ' : 'ru-RU'),
-            fallbackLang: @js(app()->getLocale() === 'kk' ? 'ru-RU' : 'kk-KZ'),
             strings: @js(__('messages.js')),
         })"
         class="play-app"
@@ -109,10 +107,20 @@
                     </p>
                 </div>
 
+                <div class="play-live" x-show="listening || transcribing || hasSpeech">
+                    <p class="play-kicker">{{ __('messages.play.live_kicker') }}</p>
+                    <p class="play-live-text" x-show="hasSpeech" x-html="liveHtml"></p>
+                    <p class="play-live-placeholder" x-show="!hasSpeech">{{ __('messages.play.live_placeholder') }}</p>
+                    <p class="play-live-pending" x-show="listening && pendingChunks > 0">
+                        <span class="play-live-dot"></span>{{ __('messages.play.mic_transcribing') }}
+                    </p>
+                    <p class="play-live-hint" x-show="hasSpeech && (photo?.words || []).length">{{ __('messages.play.live_hint') }}</p>
+                </div>
+
                 <button
                     type="button"
                     class="btn-gold play-btn"
-                    :disabled="loading || transcribing || !hasSpeech"
+                    :disabled="loading || transcribing || (!listening && !hasSpeech)"
                     @click="submitPrompt()"
                 >
                     <span x-text="loading ? @js(__('messages.play.saving')) : @js(__('messages.play.review_button'))"></span>

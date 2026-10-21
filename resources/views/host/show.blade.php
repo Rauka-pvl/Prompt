@@ -4,7 +4,7 @@
 
 @section('nav')
     <span class="max-w-[40vw] truncate text-xs sm:max-w-none sm:text-sm">{{ __('messages.host.key') }} <strong class="text-gold-soft">{{ $room->key }}</strong></span>
-    <a href="{{ route('play.show', $room) }}" class="btn-ghost rounded-full px-3 py-1.5 text-xs text-white sm:px-4 sm:py-2 sm:text-sm">{{ __('messages.host.role_player') }}</a>
+    <a href="{{ route('play.show', $room) }}" target="_blank" rel="noopener" class="btn-ghost rounded-full px-3 py-1.5 text-xs text-white sm:px-4 sm:py-2 sm:text-sm">{{ __('messages.host.role_player') }}</a>
 @endsection
 
 @section('content')

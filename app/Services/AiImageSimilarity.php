@@ -8,17 +8,18 @@ use RuntimeException;
 
 class AiImageSimilarity
 {
-    private const SYSTEM_PROMPT = 'You are a fair judge in a party game. Players describe a photo in words, an AI draws a picture from the description, and you score how close the drawing is to the original photo. Judge what a person would notice at a glance, not pixel details. Answer with a single integer from 0 to 100 and nothing else.';
+    private const SYSTEM_PROMPT = 'You are a fair judge in a party game. Players describe a photo in words, an AI draws a new picture from that description alone, and you score how similar the drawing is to the original photo as a whole. Judge the overall impression a person gets when looking at both pictures side by side, not pixel details. Answer with a single integer from 0 to 100 and nothing else.';
 
     private const PROMPT = <<<'TXT'
-Image 1 is the original photo. Image 2 is the generated attempt.
-Weigh: main subject (50%), composition and pose (25%), colors and lighting (15%), setting and mood (10%).
+Image 1 is the original photo. Image 2 was drawn by an AI from a player's description.
+How similar is image 2 to image 1 overall, as a whole picture? Score from 0 to 100.
 Calibration:
-90-100: almost the same picture.
-75-89: same kind of subject in a similar scene, only minor differences (model, breed, small objects).
-55-74: same kind of subject, but clear differences in pose, setting or colors.
-30-54: different subject, but similar scene, composition or colors.
-0-29: mostly unrelated.
+95-100: looks like the same picture.
+80-94: same subject and scene, only small differences.
+60-79: clearly the same idea, but noticeable differences.
+35-59: partly similar, several important things differ.
+10-34: only a few things in common.
+0-9: unrelated.
 Reply with the number only.
 TXT;
 

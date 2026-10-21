@@ -4,5 +4,8 @@ namespace App\Contracts;
 
 interface ImageGenerator
 {
-    public function generate(string $prompt, string $directory, ?string $referencePath = null): string;
+    /**
+     * @param  string|null  $imageSize  fal preset such as square_hd or landscape_4_3
+     */
+    public function generate(string $prompt, string $directory, ?string $imageSize = null): string;
 }

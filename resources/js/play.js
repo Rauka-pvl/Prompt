@@ -1,9 +1,17 @@
+import { ChunkedSpeechRecorder, speechRecordingSupported } from './speech-recorder';
+
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') ?? '';
 }
 
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function escapeHtml(value) {
+    return value.replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    })[char]);
 }
 
 const recordTailMs = 700;
@@ -32,6 +40,9 @@ function storeDismissedRound(key, roundId) {
 
 export function promptGame(config) {
     const dismissedKey = `prompt:dismissed:${config.stateUrl}`;
+    // Kept outside Alpine's reactive state: MediaRecorder and AudioContext break when proxied.
+    let speech = null;
+    let finishing = null;
 
     return {
         status: 'lobby',
@@ -39,7 +50,6 @@ export function promptGame(config) {
         canStart: false,
         photo: null,
         round: null,
-        prompt: '',
         editedPrompt: '',
         editRoundId: null,
         error: '',
@@ -52,26 +62,14 @@ export function promptGame(config) {
         refreshing: false,
         failedRefreshes: 0,
         listening: false,
-        speechSupported: Boolean(
-            window.SpeechRecognition || window.webkitSpeechRecognition || (window.MediaRecorder && navigator.mediaDevices),
-        ),
+        speechSupported: speechRecordingSupported(),
         spokenRaw: '',
-        interimText: '',
-        recognition: null,
-        mediaStream: null,
-        recorder: null,
-        audioChunks: [],
+        pendingChunks: 0,
         transcribing: false,
-        transcribeTask: null,
         recordLimit: 30,
         secondsLeft: 30,
         timerId: null,
         strings: config.strings || {},
-        lang: config.lang || 'ru-RU',
-        fallbackLang: config.fallbackLang || 'kk-KZ',
-        currentSpeechLang: config.lang || 'ru-RU',
-        fallbackUsed: false,
-        heardSpeech: false,
 
         get viewStatus() {
             if (this.status === 'done' && this.round && this.dismissedRoundId === this.round.id) {
@@ -81,12 +79,22 @@ export function promptGame(config) {
             return this.status;
         },
 
-        get spokenPreview() {
-            return [this.spokenRaw, this.interimText].filter(Boolean).join(' ').trim();
+        get hasSpeech() {
+            return this.spokenRaw.trim() !== '';
         },
 
-        get hasSpeech() {
-            return this.cleanPrompt(this.spokenPreview).trim() !== '';
+        get liveHtml() {
+            const html = escapeHtml(this.spokenRaw);
+            const patterns = this.wordPatterns();
+
+            if (patterns.length === 0) {
+                return html;
+            }
+
+            return html.replace(
+                this.wordRegExp(patterns.join('|'), 'giu'),
+                (word) => `<mark class="play-live-forbidden">${word}</mark>`,
+            );
         },
 
         get formattedTime() {
@@ -159,9 +167,7 @@ export function promptGame(config) {
             }
 
             if (data.status === 'lobby' && previousStatus !== 'lobby') {
-                this.prompt = '';
                 this.spokenRaw = '';
-                this.interimText = '';
                 this.secondsLeft = this.recordLimit;
                 this.stopMic();
             }
@@ -245,9 +251,7 @@ export function promptGame(config) {
                 const response = await window.axios.post(config.startUrl, {}, {
                     headers: { 'X-CSRF-TOKEN': csrfToken() },
                 });
-                this.prompt = '';
                 this.spokenRaw = '';
-                this.interimText = '';
                 this.secondsLeft = this.recordLimit;
                 this.applyState(response.data);
             } catch (error) {
@@ -255,25 +259,6 @@ export function promptGame(config) {
             } finally {
                 this.loading = false;
             }
-        },
-
-        applySpokenText(raw) {
-            const cleaned = this.cleanPrompt(raw);
-
-            if (cleaned !== raw) {
-                const removed = this.findRemovedWord(raw, cleaned);
-                if (removed) {
-                    this.flashedWord = removed.toLowerCase();
-                    setTimeout(() => {
-                        if (this.flashedWord === removed.toLowerCase()) {
-                            this.flashedWord = '';
-                        }
-                    }, 400);
-                }
-            }
-
-            this.spokenRaw = raw.trim();
-            this.prompt = cleaned.trim();
         },
 
         async toggleMic() {
@@ -286,244 +271,104 @@ export function promptGame(config) {
         },
 
         async startMic() {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
             if (!this.speechSupported) {
                 this.error = this.strings.mic_unsupported || '';
                 return;
             }
 
+            if (this.listening || finishing) {
+                return;
+            }
+
             this.error = '';
-            this.fallbackUsed = false;
-            this.heardSpeech = false;
-            this.currentSpeechLang = this.lang;
+            this.spokenRaw = '';
+            this.pendingChunks = 0;
+
+            const recorder = new ChunkedSpeechRecorder({
+                transcribe: (blob, extension, signal) => this.transcribeChunk(blob, extension, signal),
+                onUpdate: ({ text, pending }) => {
+                    if (speech === recorder) {
+                        this.spokenRaw = text;
+                        this.pendingChunks = pending;
+                    }
+                },
+            });
+
+            speech = recorder;
 
             try {
-                this.mediaStream = await navigator.mediaDevices.getUserMedia({
-                    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-                });
+                await recorder.start();
             } catch {
+                recorder.abort();
+                speech = null;
                 this.error = this.strings.mic_denied || '';
+                return;
+            }
+
+            if (speech !== recorder) {
+                recorder.abort();
                 return;
             }
 
             this.listening = true;
             this.startRecordTimer();
-            this.startRecorder();
-
-            if (SpeechRecognition) {
-                this.attachRecognition(SpeechRecognition, this.lang);
-            }
         },
 
-        startRecorder() {
-            this.audioChunks = [];
-            this.recorder = null;
+        async transcribeChunk(blob, extension, signal) {
+            const form = new FormData();
+            form.append('audio', blob, `speech.${extension}`);
 
-            if (!window.MediaRecorder || !this.mediaStream) {
-                return;
-            }
-
-            const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus']
-                .find((type) => window.MediaRecorder.isTypeSupported?.(type));
-
-            const options = { audioBitsPerSecond: 24000, ...(mimeType ? { mimeType } : {}) };
-
-            try {
-                this.recorder = new MediaRecorder(this.mediaStream, options);
-            } catch {
-                this.recorder = null;
-                return;
-            }
-
-            this.recorder.ondataavailable = (event) => {
-                if (event.data?.size) {
-                    this.audioChunks.push(event.data);
-                }
-            };
-            this.recorder.start(1000);
-        },
-
-        stopRecorder() {
-            const recorder = this.recorder;
-            this.recorder = null;
-
-            if (!recorder || recorder.state === 'inactive') {
-                return Promise.resolve(null);
-            }
-
-            return new Promise((resolve) => {
-                recorder.onstop = () => {
-                    const type = recorder.mimeType || this.audioChunks[0]?.type || 'audio/webm';
-                    const blob = new Blob(this.audioChunks, { type });
-                    this.audioChunks = [];
-                    resolve(blob.size > 1000 ? blob : null);
-                };
-                recorder.stop();
+            const response = await window.axios.post(config.transcribeUrl, form, {
+                headers: { 'X-CSRF-TOKEN': csrfToken() },
+                timeout: 45000,
+                signal,
             });
+
+            return (response.data?.text || '').trim();
         },
 
-        releaseStream() {
-            if (this.mediaStream) {
-                this.mediaStream.getTracks().forEach((track) => track.stop());
-                this.mediaStream = null;
-            }
-        },
-
+        /**
+         * Stops recording and resolves once every segment is transcribed,
+         * so the final text always contains the last words.
+         */
         finishRecording() {
-            if (!this.listening) {
-                return this.transcribeTask || Promise.resolve();
+            if (finishing) {
+                return finishing;
+            }
+
+            const recorder = speech;
+
+            if (!recorder || !this.listening) {
+                return Promise.resolve();
             }
 
             this.clearRecordTimer();
             this.listening = false;
             this.transcribing = true;
 
-            this.transcribeTask = (async () => {
-                // The last word is usually still being spoken when the player taps stop.
-                await new Promise((resolve) => setTimeout(resolve, recordTailMs));
-
-                if (this.interimText) {
-                    this.applySpokenText(`${this.spokenRaw} ${this.interimText}`);
-                }
-
-                this.interimText = '';
-                this.detachRecognition();
-
-                const blob = await this.stopRecorder();
-                this.releaseStream();
-
-                if (blob) {
-                    await this.transcribe(blob);
-                }
-            })().finally(() => {
-                this.transcribing = false;
-                this.transcribeTask = null;
-            });
-
-            return this.transcribeTask;
-        },
-
-        async transcribe(blob) {
-            this.transcribing = true;
-
-            const extension = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
-            const form = new FormData();
-            form.append('audio', blob, `speech.${extension}`);
-
-            try {
-                const response = await window.axios.post(config.transcribeUrl, form, {
-                    headers: { 'X-CSRF-TOKEN': csrfToken() },
-                    timeout: 90000,
-                });
-                const text = (response.data?.text || '').trim();
-
-                if (text !== '' && this.status === 'playing') {
-                    this.applySpokenText(text);
-                }
-            } catch (error) {
-                this.error = error.response?.data?.message || this.strings.transcribe_error || '';
-            } finally {
-                this.transcribing = false;
-            }
-        },
-
-        attachRecognition(SpeechRecognition, language) {
-            this.detachRecognition();
-
-            this.recognition = new SpeechRecognition();
-            this.recognition.lang = language;
-            this.recognition.continuous = true;
-            this.recognition.interimResults = true;
-            this.currentSpeechLang = language;
-
-            this.recognition.onresult = (event) => {
-                this.heardSpeech = true;
-                let finalChunk = '';
-                let interim = '';
-
-                for (let i = event.resultIndex; i < event.results.length; i++) {
-                    const piece = event.results[i][0]?.transcript ?? '';
-
-                    if (event.results[i].isFinal) {
-                        finalChunk += `${piece} `;
-                    } else {
-                        interim += piece;
+            finishing = recorder.stop(recordTailMs)
+                .then(({ text, failed }) => {
+                    if (speech !== recorder) {
+                        return;
                     }
-                }
 
-                if (finalChunk.trim() !== '') {
-                    const nextRaw = `${this.spokenRaw} ${finalChunk}`.replace(/\s+/g, ' ').trim();
-                    this.applySpokenText(nextRaw);
-                }
+                    this.spokenRaw = text;
 
-                this.interimText = interim.trim();
-            };
+                    if (failed > 0) {
+                        this.error = this.strings.transcribe_error || '';
+                    }
+                })
+                .finally(() => {
+                    if (speech === recorder) {
+                        speech = null;
+                    }
 
-            this.recognition.onerror = (event) => {
-                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-                    this.error = this.strings.mic_blocked || '';
-                    this.stopMic();
-                    return;
-                }
+                    finishing = null;
+                    this.transcribing = false;
+                    this.pendingChunks = 0;
+                });
 
-                if (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'network') {
-                    return;
-                }
-
-                this.error = this.strings.mic_recognition_error || '';
-            };
-
-            this.recognition.onend = () => {
-                if (!this.listening) {
-                    return;
-                }
-
-                const tooShort = this.spokenRaw.trim().length < 3;
-                let nextLang = this.currentSpeechLang;
-
-                if (!this.fallbackUsed && tooShort) {
-                    this.fallbackUsed = true;
-                    nextLang = this.currentSpeechLang === this.lang ? this.fallbackLang : this.lang;
-                } else if (!tooShort) {
-                    nextLang = this.currentSpeechLang === this.lang ? this.fallbackLang : this.lang;
-                }
-
-                if (nextLang !== this.currentSpeechLang) {
-                    this.attachRecognition(SpeechRecognition, nextLang);
-                    return;
-                }
-
-                try {
-                    this.recognition.start();
-                } catch {
-                    // Chrome sometimes restarts while still starting.
-                }
-            };
-
-            try {
-                this.recognition.start();
-            } catch {
-                // already starting
-            }
-        },
-
-        detachRecognition() {
-            if (!this.recognition) {
-                return;
-            }
-
-            this.recognition.onresult = null;
-            this.recognition.onerror = null;
-            this.recognition.onend = null;
-
-            try {
-                this.recognition.stop();
-            } catch {
-                // already stopped
-            }
-
-            this.recognition = null;
+            return finishing;
         },
 
         startRecordTimer() {
@@ -549,21 +394,12 @@ export function promptGame(config) {
         stopMic() {
             this.clearRecordTimer();
             this.listening = false;
-            this.interimText = '';
-            this.detachRecognition();
+            this.pendingChunks = 0;
 
-            if (this.recorder) {
-                this.recorder.ondataavailable = null;
-                try {
-                    this.recorder.stop();
-                } catch {
-                    // already stopped
-                }
-                this.recorder = null;
+            if (speech) {
+                speech.abort();
+                speech = null;
             }
-
-            this.audioChunks = [];
-            this.releaseStream();
         },
 
         async submitPrompt() {
@@ -571,15 +407,15 @@ export function promptGame(config) {
             this.error = '';
             await this.finishRecording();
 
-            if (this.cleanPrompt(this.spokenRaw).trim() === '') {
+            const prompt = this.spokenRaw.trim();
+
+            if (prompt === '' || this.viewStatus !== 'playing') {
                 this.loading = false;
                 return;
             }
 
             try {
-                const response = await window.axios.post(config.submitUrl, {
-                    prompt: this.spokenRaw.trim() || this.prompt,
-                }, {
+                const response = await window.axios.post(config.submitUrl, { prompt }, {
                     headers: { 'X-CSRF-TOKEN': csrfToken() },
                 });
                 this.applyState(response.data);
@@ -656,7 +492,7 @@ export function promptGame(config) {
         },
 
         async goBack() {
-            if (this.loading || this.transcribing) {
+            if (this.loading) {
                 return;
             }
 
@@ -685,7 +521,7 @@ export function promptGame(config) {
                 if (status === 'prompted') {
                     this.editRoundId = null;
                     this.secondsLeft = this.recordLimit;
-                    this.applySpokenText(spoken);
+                    this.spokenRaw = (spoken || '').trim();
                 }
 
                 this.applyState(response.data);

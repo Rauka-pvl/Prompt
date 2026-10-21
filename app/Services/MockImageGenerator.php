@@ -9,7 +9,7 @@ use RuntimeException;
 
 class MockImageGenerator implements ImageGenerator
 {
-    public function generate(string $prompt, string $directory, ?string $referencePath = null): string
+    public function generate(string $prompt, string $directory, ?string $imageSize = null): string
     {
         $width = 768;
         $height = 768;

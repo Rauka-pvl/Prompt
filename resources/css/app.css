@@ -441,6 +441,62 @@ body {
     color: #f0c36a;
 }
 
+.play-live {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-height: 0;
+    max-height: 30vh;
+    overflow-y: auto;
+    border-radius: 1rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.25);
+    padding: 0.75rem 0.9rem;
+}
+
+.play-live-text {
+    font-size: clamp(1rem, 2.1vmin, 1.25rem);
+    line-height: 1.45;
+    color: #fff;
+    overflow-wrap: anywhere;
+}
+
+.play-live-placeholder,
+.play-live-hint {
+    font-size: 0.85rem;
+    line-height: 1.35;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.play-live-forbidden {
+    border-radius: 0.3rem;
+    background: rgba(239, 68, 68, 0.22);
+    padding: 0 0.15rem;
+    color: #fca5a5;
+    text-decoration: line-through;
+}
+
+.play-live-pending {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.85rem;
+    color: #f0c36a;
+}
+
+.play-live-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: currentColor;
+    animation: play-live-pulse 1s ease-in-out infinite;
+}
+
+@keyframes play-live-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
 .play-btn {
     flex-shrink: 0;
     width: 100%;

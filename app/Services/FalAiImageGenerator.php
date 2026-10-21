@@ -3,17 +3,19 @@
 namespace App\Services;
 
 use App\Contracts\ImageGenerator;
-use App\Support\ImageDataUri;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use RuntimeException;
 
+/**
+ * Text-to-image from the player's words only; the original photo never reaches the model.
+ */
 class FalAiImageGenerator implements ImageGenerator
 {
     public function __construct(private readonly PromptTranslator $translator) {}
 
-    public function generate(string $prompt, string $directory, ?string $referencePath = null): string
+    public function generate(string $prompt, string $directory, ?string $imageSize = null): string
     {
         $key = (string) config('prompt.fal_key');
 
@@ -21,27 +23,20 @@ class FalAiImageGenerator implements ImageGenerator
             throw new RuntimeException('FAL_KEY is not set.');
         }
 
-        $prompt = $this->translator->toEnglish($prompt);
+        $model = trim((string) config('prompt.fal_model'), '/');
+        $payload = [
+            'prompt' => $this->translator->toEnglish($prompt),
+            'image_size' => $imageSize ?? 'square_hd',
+            'num_images' => 1,
+            'output_format' => 'png',
+            'enable_safety_checker' => true,
+        ];
 
-        if ($referencePath !== null && config('prompt.reference_enabled')) {
-            $model = trim((string) config('prompt.reference_model'), '/');
-            $payload = [
-                'prompt' => $this->anchorPrompt($prompt),
-                'image_url' => ImageDataUri::fromPath($referencePath, 1024),
-                'strength' => max(0.5, min(1.0, (float) config('prompt.reference_strength'))),
-                'num_images' => 1,
-                'num_inference_steps' => 28,
-                'output_format' => 'png',
-            ];
+        if (str_contains($model, 'schnell')) {
+            $payload['num_inference_steps'] = 4;
         } else {
-            $model = trim((string) config('prompt.fal_model'), '/');
-            $payload = [
-                'prompt' => $prompt,
-                'image_size' => 'square_hd',
-                'num_images' => 1,
-                'num_inference_steps' => 4,
-                'output_format' => 'png',
-            ];
+            $payload['num_inference_steps'] = 28;
+            $payload['guidance_scale'] = 3.5;
         }
 
         $response = Http::timeout(90)
@@ -77,20 +72,5 @@ class FalAiImageGenerator implements ImageGenerator
         Storage::disk('public')->put($relativePath, $image->body());
 
         return $relativePath;
-    }
-
-    /**
-     * The player's description leads; the reference photo only loosely
-     * suggests the overall scene so weak prompts still land nearby.
-     */
-    private function anchorPrompt(string $prompt): string
-    {
-        $prompt = trim($prompt);
-
-        if ($prompt === '') {
-            return 'A photo loosely inspired by the reference image.';
-        }
-
-        return "{$prompt}. Photo, loosely inspired by the general scene of the reference image.";
     }
 }
